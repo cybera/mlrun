@@ -80,7 +80,7 @@ def create_global_module(name):
       
       setattr(parent_module, submodule_name, submodule)
 
-      if parent_module != builtins:
+      if hasattr(parent_module, '__all__'):
         parent_module.__all__.append(submodule_name)
     module_stack.append(submodule)
 
