@@ -10,6 +10,8 @@ import mlrun
 import os
 import inspect
 
+from keras.models import load_model
+
 def help(model):
   print("I don't know what you're talking about, there is no model '%s'" % model)
 
@@ -67,6 +69,8 @@ def start(argv):
   parser.add_argument("model", help=model_help().lstrip())
   parser.add_argument("--mode", action="store", default=None, help=mode_help().lstrip())
   parser.add_argument("--dataset", action="store", default="helloworld", help=dataset_help().lstrip())
+  parser.add_argument("--no-rebuild", action="store_true", help="When training, if a model has already been saved, continue training it")
+  parser.add_argument("--model-name", action="store", help="Name of the model to save/load")
 
   args = parser.parse_args(args=argv[1:])
   model = mlrun.model.load(args.model)
@@ -75,31 +79,39 @@ def start(argv):
     print("Model '%s' not found." % args.model)
     mlrun.model.list()
   else:
-    if args.mode:
-      dataset_name, subset_name = parse_dataset(args.dataset, args.mode)
+    derived_args = {}
+    derived_args['model'] = model_instance(model, args.model_name, args.no_rebuild)
+
+    steps = [args.mode] if args.mode else ["train", "test"]
+
+    print("Running %s..." % ", ".join(steps))
+
+    for step in steps:
+      dataset_name, subset_name = parse_dataset(args.dataset, step)
       dataset = mlrun.dataset.fetch(dataset_name, subset_name)
+      derived_args['dataset'] = dataset
+      print("%s dataset: %s (%s - size: %i)" % 
+            (step, dataset_name, subset_name, len(dataset.labels)))
+      model_func = getattr(model, step)
+      extra_args = mlrun.util.exclude_keys(args, ['model', 'dataset'])
+      model_func_args = mlrun.util.build_args(model_func, [derived_args, extra_args])
+      model_func(**model_func_args)
+      if step == "train":
+        save_model(model, derived_args['model'], args.model_name)
 
-      print("Running %s..." % args.mode)
-      print("Dataset: %s (%s - size: %i)" % (dataset_name, subset_name, len(dataset.labels)))
+    if "train" in steps:
+      save_model(model, derived_args['model'], args.model_name)
 
-      model_func = getattr(model, args.mode)
-      # kind of hacky way to allow modes that don't need a data set (mainly for visualizations
-      # of a model after it has been made)
-      if len(inspect.getargspec(model_func).args) > 0:
-        model_func(dataset)
-      else:
-        model_func()
+def model_instance(model_mod, model_name=None, no_rebuild=False):
+  if no_rebuild:
+    if not model_name:
+      model_name = model_mod.name
+    return load_model(config.paths.saved_model("%s.h5" % model_name))
+  else:
+    return model_mod.build()
 
-    else:
-      dataset_name, train_subset_name = parse_dataset(args.dataset, "train")
-      _, test_subset_name = parse_dataset(args.dataset, "test")
+def save_model(model_mod, model_instance, model_name=None):
+  if not model_name:
+    model_name = model_mod.name
 
-      train = mlrun.dataset.fetch(dataset_name, train_subset_name)
-      test = mlrun.dataset.fetch(dataset_name, test_subset_name)
-
-      print("Running train and test...")
-      print("Train dataset: %s (%s - size: %i)" % (dataset_name, train_subset_name, len(train.labels)))
-      print("Test dataset: %s (%s - size: %i)" % (dataset_name, test_subset_name, len(test.labels)))  
-
-      model.train(train)
-      model.test(test)
+  model_instance.save(config.paths.saved_model("%s.h5" % model_name))

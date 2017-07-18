@@ -1,6 +1,6 @@
 from os.path import dirname, basename, isfile, splitext, sep as pathsep, join
 from glob import glob
-import sys, imp
+import sys, imp, inspect
 
 # Import any submodules automatically within the module. Add a 'list()'
 # function that lists all the submodules. If named arguments are passed
@@ -106,3 +106,21 @@ def namespace_folder(namespace, path):
   setattr(namespace_module, 'list', list_submodules)
 
   return namespace_module
+
+def build_args(func, arg_dicts):
+  call_args = {}
+  func_argnames = inspect.getargspec(func).args
+  for arg_dict in arg_dicts:
+    # Get a subset of arguments that exist in the arg_dict and the function wants
+    func_args = { k: arg_dict[k] for k in arg_dict.keys() & func_argnames }
+    # Merge those into the complete set of call arguments
+    call_args.update(func_args)
+  return call_args
+
+def exclude_keys(o, exclusions):
+  if not hasattr(o, 'keys'):
+    if hasattr(o, '__dict__'):
+      o = o.__dict__
+    else:
+      raise Exception("Can't exclude keys from an object of type %s" % type(o))
+  return { k: o[k] for k in o.keys() if k not in exclusions }
